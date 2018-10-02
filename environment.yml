@@ -32,11 +32,11 @@ dependencies:
 - jedi
 - jinja2
 - jsonschema
-- jupyter
-- jupyter_client
-- jupyter_console
-- jupyter_core
-- conda-forge::jupyter_contrib_nbextensions  
+#- jupyter
+#- jupyter_client
+#- jupyter_console
+#- jupyter_core
+#- conda-forge::jupyter_contrib_nbextensions  
 - libiconv
 - libpng
 - libsodium
@@ -45,7 +45,6 @@ dependencies:
 - matplotlib
 - mistune
 - mkl
-- nbconvert
 - nbformat
 - notebook
 - numpy
@@ -94,6 +93,7 @@ dependencies:
 - bcolz
 - prompt_toolkit
 - pytest
+- cython
 - pip:
   - torchvision>=0.1.9
   - opencv-python
@@ -106,3 +106,5 @@ dependencies:
   - plotnine
   - kaggle-cli
   - ipywidgets
+  - nbconvert
+  - PyHamcrest
