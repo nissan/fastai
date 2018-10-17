@@ -9,8 +9,8 @@ from .docstrings import *
 from .core import *
 from ..torch_core import *
 __all__ = ['get_fn_link', 'link_docstring', 'show_doc', 'get_ft_names',
-           'get_exports', 'show_video', 'show_video_from_youtube', 'create_anchor', 'import_mod', 'get_source_link',
-           'is_enum', 'jekyll_note', 'jekyll_warn', 'jekyll_important', 'nbshow']
+           'get_exports', 'show_video', 'show_video_from_youtube', 'import_mod', 'get_source_link',
+           'is_enum', 'jekyll_note', 'jekyll_warn', 'jekyll_important', 'doc']
 
 MODULE_NAME = 'fastai'
 SOURCE_URL = 'https://github.com/fastai/fastai/blob/master/'
@@ -69,7 +69,7 @@ def format_ft_def(func, full_name:str=None)->str:
     fmt_params = [format_param(param) for name,param
                   in sig.parameters.items() if name not in ('self','cls')]
     arg_str = f"({', '.join(fmt_params)})"
-    if sig.return_annotation and (sig.return_annotation != sig.empty): arg_str += f" -> {anno_repr(sig.return_annotation)}"
+    if sig.return_annotation and (sig.return_annotation != sig.empty): arg_str += f" → {anno_repr(sig.return_annotation)}"
     if is_fastai_class(type(func)):        arg_str += f" :: {link_type(type(func))}"
     f_name = f"`class` {name}" if inspect.isclass(func) else name
     return f'{f_name}\n> {name}{arg_str}'
@@ -91,6 +91,7 @@ def show_doc(elt, doc_string:bool=True, full_name:str=None, arg_comments:dict=No
              ignore_warn:bool=False, markdown=True):
     "Show documentation for element `elt`. Supported types: class, Callable, and enum."
     arg_comments = ifnone(arg_comments, {})
+    elt = getattr(elt, '__func__', elt)
     if full_name is None and hasattr(elt, '__name__'): full_name = elt.__name__
     if inspect.isclass(elt):
         if is_enum(elt.__class__):   doc = get_enum_doc(elt, full_name)
@@ -108,9 +109,11 @@ def show_doc(elt, doc_string:bool=True, full_name:str=None, arg_comments:dict=No
     if markdown: display(md)
     else: return md
 
-def nbshow(elt):
+def doc(elt):
+    "Show `show_doc` info in preview window along with link to full docs."
     global use_relative_links
     use_relative_links = False
+    elt = getattr(elt, '__func__', elt)
     md = show_doc(elt, markdown=False)
     if is_fastai_class(elt): md += f'\n\n[Show in docs]({get_fn_link(elt)})'
     output = HTMLExporter().markdown2html(md)
@@ -123,7 +126,7 @@ def format_docstring(elt, arg_comments:dict={}, alt_doc_string:str='', ignore_wa
     "Merge and format the docstring definition with `arg_comments` and `alt_doc_string`."
     parsed = ""
     doc = parse_docstring(inspect.getdoc(elt))
-    description = alt_doc_string or doc['long_description'] or doc['short_description']
+    description = alt_doc_string or f"{doc['short_description']} {doc['long_description']}"
     if description: parsed += f'\n\n{link_docstring(inspect.getmodule(elt), description)}'
 
     resolved_comments = {**doc.get('comments', {}), **arg_comments} # arg_comments takes priority
@@ -155,23 +158,22 @@ def link_docstring(modules, docstring:str, overwrite:bool=False) -> str:
 
 def find_elt(modvars, keyword, match_last=True):
     "Attempt to resolve keywords such as Learner.lr_find. `match_last` starts matching from last component."
+    keyword = strip_fastai(keyword)
     if keyword in modvars: return modvars[keyword]
-    if '.' not in keyword: return None
     comps = keyword.split('.')
-    if (comps[0] == 'torch' or comps[0] == 'torchvision'): match_last = False
-    if match_last: return modvars.get(comps[-1])
     comp_elt = modvars.get(comps[0])
-    if hasattr(comp_elt, '__dict__'):
-        return find_elt(comp_elt.__dict__, '.'.join(comps[1:]), match_last=match_last)
+    if hasattr(comp_elt, '__dict__'): return find_elt(comp_elt.__dict__, '.'.join(comps[1:]), match_last=match_last)
+    # else: return modvars.get(comps[-1])
 
-def import_mod(mod_name:str):
+def import_mod(mod_name:str, ignore_errors=False):
     "Return module from `mod_name`."
     splits = str.split(mod_name, '.')
     try:
         if len(splits) > 1 : mod = importlib.import_module('.' + '.'.join(splits[1:]), splits[0])
         else: mod = importlib.import_module(mod_name)
         return mod
-    except: print(f"Module {mod_name} doesn't exist.")
+    except: 
+        if not ignore_errors: print(f"Module {mod_name} doesn't exist.")
 
 def show_doc_from_name(mod_name, ft_name:str, doc_string:bool=True, arg_comments:dict={}, alt_doc_string:str=''):
     "Show documentation for `ft_name`, see `show_doc`."
@@ -238,11 +240,8 @@ def get_module_toc(mod_name):
 
 def get_class_toc(mod_name:str, cls_name:str):
     "Display table of contents for `cls_name`."
-    splits = str.split(mod_name, '.')
-    try: mod = importlib.import_module('.' + '.'.join(splits[1:]), splits[0])
-    except:
-        print(f"Module {mod_name} doesn't exist.")
-        return
+    mod = import_mod(mod_name)
+    if mod is None: return
     splits = str.split(cls_name, '.')
     assert hasattr(mod, splits[0]), print(f"Module {mod_name} doesn't have a function named {splits[0]}.")
     elt = getattr(mod, splits[0])
@@ -314,10 +313,6 @@ def title_md(s:str, title_level:int, markdown=True):
     res = '#' * title_level
     if title_level: res += ' '
     return Markdown(res+s) if markdown else (res+s)
-
-def create_anchor(text, title_level=0, name=None):
-    if name is None: name=str2id(text)
-    display(title_md(f'<a id={name}></a>{text}'))
 
 def jekyll_div(s,c,h,icon=None):
     icon = ifnone(icon,c)

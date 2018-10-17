@@ -7,7 +7,7 @@ from pathlib import Path
 from .core import *
 from .nbdoc import *
 
-__all__ = ['create_module_page', 'generate_all', 'update_module_page', 'update_all', 'import_mod',
+__all__ = ['create_module_page', 'update_module_page', 'import_mod',
            'link_nb', 'update_notebooks', 'generate_missing_metadata', 'update_nb_metadata']
 
 def get_empty_notebook():
@@ -66,17 +66,22 @@ def get_global_vars(mod):
     return d
 
 def write_nb(nb, nb_path, mode='w'):
-    json.dump(nb, open(nb_path, mode), indent=1)
+    try:
+        with open(nb_path, mode) as f: f.write(nbformat.writes(nb, version=4))
+    except Exception as e:
+        print(f'Could not output nb format. Dumping json instead.\nPath: {nb_path}\nException: {e}')
+        json.dump(nb, open(nb_path, mode), indent=1)
 
-def execute_nb(fname, metadata=None):
+def execute_nb(fname, metadata=None, save=True):
     "Execute notebook `fname` with `metadata` for preprocessing."
     # Any module used in the notebook that isn't inside must be in the same directory as this script
     with open(fname) as f: nb = nbformat.read(f, as_version=4)
     ep = ExecutePreprocessor(timeout=600, kernel_name='python3')
     metadata = metadata or {}
     ep.preprocess(nb, metadata)
-    with open(fname, 'wt') as f: nbformat.write(nb, f)
-    NotebookNotary().sign(nb)
+    if save:
+        with open(fname, 'wt') as f: nbformat.write(nb, f)
+        NotebookNotary().sign(nb)
 
 def _symbol_skeleton(name): return [get_doc_cell(name), get_md_cell(f"`{name}`")]
 
@@ -111,24 +116,15 @@ _default_exclude = ['.ipynb_checkpoints', '__pycache__', '__init__.py', 'imports
 def get_module_names(path_dir, exclude=None):
     if exclude is None: exclude = _default_exclude
     "Search a given `path_dir` and return all the modules contained inside except those in `exclude`"
-    files = path_dir.glob('*')
-    res = []
+    files = sorted(path_dir.glob('*'), key=lambda x: (x.is_dir(), x.name), reverse=True) # directories first
+    res = [f'{path_dir.name}']
     for f in files:
         if f.is_dir() and f.name in exclude: continue # exclude directories
         if any([f.name.endswith(ex) for ex in exclude]): continue # exclude extensions
 
-        if f.name[-3:] == '.py': res.append(f'{path_dir.name}.{f.name[:-3]}')
+        if f.suffix == '.py': res.append(f'{path_dir.name}.{f.stem}')
         elif f.is_dir(): res += [f'{path_dir.name}.{name}' for name in get_module_names(f)]
     return res
-
-def generate_all(pkg_name, dest_path, exclude=None):
-    "Generate the documentation for all the modules in `pkg_name` at `dest_path`."
-    if exclude is None: exclude = _default_exclude
-    mod_files = get_module_names(Path(pkg_name), exclude)
-    for mod_name in mod_files:
-        mod = import_mod(mod_name)
-        if mod is None: continue
-        create_module_page(mod, dest_path)
 
 def read_nb(fname):
     "Read a notebook in `fname` and return its corresponding json"
@@ -210,20 +206,26 @@ def update_nb_metadata(nb_path=None, title=None, summary=None, keywords='fastai'
     NotebookNotary().sign(nb)
 
 def has_metadata_cell(cells, fn):
-    for c in cells: 
+    for c in cells:
         if re.search(f"update_nb_metadata\('{fn}'", c['source']): return c
 
 def stringify(s): return f'\'{s}\'' if isinstance(s, str) else s
 
 IMPORT_RE = re.compile(r"from (fastai[\.\w_]*)")
-def get_imported_modules(cells):
-    module_names = ['fastai']
-    for cell in cells:
-        if cell['cell_type'] == 'code':
-            for m in IMPORT_RE.finditer(cell['source']):
-                if m.group(1) not in module_names: module_names.append(m.group(1))
-    mods = [import_mod(m) for m in module_names]
+def get_imported_modules(cells, nb_module_name=''):
+    "Finds all submodules of notebook - sorted by submodules > top level modules > manual imports. This gives notebook imports priority"
+    module_names = get_top_level_modules()
+    nb_imports = [match.group(1) for cell in cells for match in IMPORT_RE.finditer(cell['source']) if cell['cell_type'] == 'code']
+    parts = nb_module_name.split('.')
+    parent_modules = ['.'.join(parts[:(x+1)]) for x in range_of(parts)] # Imports parent modules - a.b.c = [a, a.b, a.b.c]
+    all_modules = module_names + nb_imports + parent_modules
+    mods = [import_mod(m, ignore_errors=True) for m in all_modules]
     return [m for m in mods if m is not None]
+
+def get_top_level_modules(num_levels=1):
+    mod_dir = Path(import_mod('fastai').__file__).parent
+    filtered_n = filter(lambda x: x.count('.')<=num_levels, get_module_names(mod_dir))
+    return sorted(filtered_n, key=lambda s: s.count('.'), reverse=True) # Submodules first (sorted by periods)
 
 NEW_FT_HEADER = '## New Methods - Please document or move to the undocumented section'
 UNDOC_HEADER = '## Undocumented Methods - Methods moved below this line will intentionally be hidden'
@@ -243,6 +245,14 @@ def remove_undoc_cells(cells):
     old, _, _ = parse_sections(cells)
     return old
 
+# currently code vbox sub-cells mainly
+def remove_code_cell_jupyter_widget_state_elem(cells):
+    for c in cells:
+        if c['cell_type'] == 'code':
+            if 'outputs' in c:
+                c['outputs'] = [l for l in c['outputs'] if not ('data' in l and 'application/vnd.jupyter.widget-view+json' in l.data)]
+    return cells
+
 def update_module_page(mod, dest_path='.'):
     "Update the documentation notebook of a given module."
     doc_path = get_doc_path(mod, dest_path)
@@ -250,7 +260,7 @@ def update_module_page(mod, dest_path='.'):
     nb = read_nb(doc_path)
     cells = nb['cells']
 
-    link_markdown_cells(cells, get_imported_modules(cells))
+    link_markdown_cells(cells, get_imported_modules(cells, mod.__name__))
 
     type_dict = read_nb_types(cells)
     gvar_map = get_global_vars(mod)
@@ -274,22 +284,9 @@ def update_module_page(mod, dest_path='.'):
 def link_nb(nb_path):
     nb = read_nb(nb_path)
     cells = nb['cells']
-    link_markdown_cells(cells, get_imported_modules(cells))
+    link_markdown_cells(cells, get_imported_modules(cells, Path(nb_path).stem))
     write_nb(nb, nb_path)
     NotebookNotary().sign(read_nb(nb_path))
-
-def update_all(pkg_name, dest_path='.', exclude=None, create_missing=False):
-    "Update all the notebooks in `pkg_name`."
-    if exclude is None: exclude = _default_exclude
-    mod_files = get_module_names(Path(pkg_name), exclude)
-    for f in mod_files:
-        mod = import_mod(f)
-        if mod is None: continue
-        if os.path.exists(get_doc_path(mod, dest_path)):
-            update_module_page(mod, dest_path)
-        elif create_missing:
-            print(f'Creating module page of {f}')
-            create_module_page(mod, dest_path)
 
 def get_module_from_notebook(doc_path):
     "Find module given a source path. Assume it belongs to fastai directory"
@@ -331,4 +328,3 @@ def update_notebooks(source_path, dest_path=None, update_html=True, update_nb=Fa
         for f in Path(source_path).glob('*.ipynb'):
             update_notebooks(f, dest_path=dest_path, update_html=update_html, update_nb=update_nb, update_nb_links=update_nb_links, do_execute=do_execute, html_path=html_path)
     else: print('Could not resolve source file:', source_path)
-
