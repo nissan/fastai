@@ -121,7 +121,7 @@ class ImageMultiDataset(LabelDataset):
         return res
 
     def get_labels(self, idx:int)->ImgLabels: return [self.classes[i] for i in self.y[idx]]
-    def __getitem__(self,i:int)->Tuple[Image, ImgLabels]: return open_image(self.x[i]), self.encode(self.y[i])
+    def __getitem__(self,i:int)->Tuple[Image, np.ndarray]: return open_image(self.x[i]), self.encode(self.y[i])
 
     @classmethod
     def from_single_folder(cls, folder:PathOrStr, classes:Classes, check_ext=True):
@@ -141,12 +141,12 @@ class ImageMultiDataset(LabelDataset):
 
 class SegmentationDataset(DatasetBase):
     "A dataset for segmentation task."
-    def __init__(self, x:Collection[PathOrStr], y:Collection[PathOrStr]):
+    def __init__(self, x:Collection[PathOrStr], y:Collection[PathOrStr], div=False):
         assert len(x)==len(y)
-        self.x,self.y = np.array(x),np.array(y)
+        self.x,self.y,self.div = np.array(x),np.array(y),div
 
-    def __getitem__(self, i:int)->Tuple[Image,ImageMask]:
-        return open_image(self.x[i]), open_mask(self.y[i])
+    def __getitem__(self, i:int)->Tuple[Image,ImageSegment]:
+        return open_image(self.x[i]), open_mask(self.y[i], self.div)
 
 @dataclass
 class ObjectDetectDataset(Dataset):
@@ -247,7 +247,7 @@ def _df_to_fns_labels(df:pd.DataFrame, fn_col:int=0, label_col:int=1,
     "Get image file names and labels from `df`."
     if label_delim:
         df.iloc[:,label_col] = list(csv.reader(df.iloc[:,label_col], delimiter=label_delim))
-    labels = df.iloc[:,label_col]
+    labels = df.iloc[:,label_col].values
     fnames = df.iloc[:,fn_col]
     if suffix: fnames = fnames.astype(str) + suffix
     return fnames, labels
