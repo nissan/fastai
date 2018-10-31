@@ -58,44 +58,50 @@ You can skip this step if you have done it once already on the system you're mak
 
 ## Quick Release Process
 
+No matter which release process you follow, always remember to start with:
+
+```
+git pull
+```
+Otherwise it's very easy to have an outdated checkout and release an outdated version.
+
+If however you'd like to make a release not from the `HEAD`, but from a specific commit,
+
+```
+git checkout <desired commit>
+```
+
+then **do not use the automated process**, since it resets to `master` branch. Use the step-by-step process instead, which is already instrumented for this special case. (But we could change the fully automated release to support this way too if need be).
 
 Here is the "I'm feeling lucky" version, do not attempt unless you understand the build process.
 
 ```
 make release
-make post-release-checks
 ```
+
+`make test`'s non-deterministic tests may decide to fail right during the release rites. It has now been moved to the head of the process, so if it fails not due to a bug but due to its unreliability, it won't affect the release process. Just rerun `make release` again.
 
 Here is the quick version that includes all the steps w/o the explanations. If you're unfamiliar with this process use the next section instead.
 
 ```
 make tools-update
-make master-branch-switch
+make master-branch-switch && make git-not-dirty
+make test
 make bump && make changes-finalize
 make release-branch-create && make commit-version
 make master-branch-switch
 make bump-dev && make changes-dev-cycle
 make commit-dev-cycle-push
-make prev-branch-switch && make test && make commit-tag-push
+make prev-branch-switch && make commit-tag-push
 make dist && make upload
-```
-
-Now wait a few minutes for the pypi/conda servers to make the new packages visible to the clients and then:
-
-```
 make test-install
 make backport-check
-
+make master-branch-switch
 ```
 
 If the `make backport-check` target says you need to backport, proceed to the [backporting section](#backporting-release-branch-to-master). This stage can't be fully automated since it requires you to decide what to backport if anything.
 
-
-```
-make master-branch-switch
-```
-
-
+And announce the release and its changes in [Developer chat thread](https://forums.fast.ai/t/developer-chat/22363/289).
 
 
 
@@ -106,26 +112,33 @@ This is a one-step at a time process. If you find any difficulties scroll down t
 The starting point of the workflow is a dev version of the master branch. For this process we will use `1.0.6.dev0` starting point as an example.
 
 
+1. check that `CHANGES.md` looks good, remove any empty sections, but don't modify the line:
 
-1. install the latest tools that will be used during the build
+   ```
+   ## 1.0.12.dev0 (Work In Progress)
+   ```
+
+   The build process relies on this exact format, it will change the version number and replace `Work In Progress` with release data automatically. If you change it manually the automated process will fail. So do not.
+
+2. install the latest tools that will be used during the build
 
     ```
     make tools-update            # update pip/conda build tools
     ```
 
-2. make sure we start with master branch
+3. make sure we start with master branch
 
     ```
     make master-branch-switch    # git checkout master
     ```
 
-3. check-dirty - git cleanup/stash/commit so there is nothing in the way
+4. check-dirty - git cleanup/stash/commit so there is nothing in the way
 
     ```
     make git-not-dirty || echo "Commit changes before proceeding"
     ```
 
-4. pick a starting point
+5. pick a starting point
 
     Normally, `git pull` to HEAD is fine, but it's the best to know which 'stable' <commit sha1> to use as a starting point.
 
@@ -137,7 +150,13 @@ The starting point of the workflow is a dev version of the master branch. For th
     git checkout <commit>
     ```
 
-5. start release-$(version) branch
+6. validate quality
+
+    ```
+    make test                     # py.test tests
+    ```
+
+7. start release-$(version) branch
 
 
     ```
@@ -157,7 +176,7 @@ We are ready to make the new release branch:
     make commit-version           # git commit fastai/version.py
     ```
 
-6. go back to master and bump it to the next version + .dev0
+1. go back to master and bump it to the next version + .dev0
 
 
     ```
@@ -174,27 +193,22 @@ We are ready to make the new release branch:
     make commit-dev-cycle-push    # git commit fastai/version.py CHANGES.md; git push
     ```
 
-7. now we are no longer concerned with master, all the rest of the work is done on release-$(version) branch (we are using `git checkout -` here (like in `cd -`, since we no longer have the previous version)
+2. now we are no longer concerned with master, all the rest of the work is done on release-$(version) branch (we are using `git checkout -` here (like in `cd -`, since we no longer have the previous version)
 
     ```
     make prev-branch-switch       # git checkout - (i.e. release-1.0.6 branch)
     ```
 
-8. finalize CHANGES.md (remove empty items) - version and date (could be automated)
+3. finalize CHANGES.md (remove empty items) - version and date (could be automated)
 
-9. validate quality
 
-    ```
-    make test                     # py.test tests
-    ```
-
-10. git tag with version, commit and push CHANGES.md and version.py
+4. git tag with version, commit and push CHANGES.md and version.py
 
     ```
     make commit-tag-push          # git commit CHANGES.md; git tag; git push
     ```
 
-11. build the packages. Note that this step can take a very long time (15 mins or more). It's important that before you run it you remove or move away any large files or directories that aren't part of the release (e.g. `data`, `tmp`, `models`, and `checkpoints`), and move them back when done.
+5. build the packages. Note that this step can take a very long time (15 mins or more). It's important that before you run it you remove or move away any large files or directories that aren't part of the release (e.g. `data`, `tmp`, `models`, and `checkpoints`), and move them back when done.
 
     ```
     make dist                     # make dist-pypi; make dist-conda
@@ -202,7 +216,7 @@ We are ready to make the new release branch:
 
     This target is composed of the two individual targets listed above, so if anything goes wrong you can run them separately.
 
-12. upload packages.
+6. upload packages.
 
     ```
     make upload                  # make upload-pypi; make upload-conda
@@ -210,14 +224,14 @@ We are ready to make the new release branch:
 
     This target is composed of the two individual targets listed above, so if anything goes wrong you can run them separately.
 
-13. test uploads by installing them (telling the installers to install the exact version we uploaded). Allow a few minutes since `make upload` for the servers to update their index. If this target fails because it can't find the newly released package, try again in a few minutes.
+7. test uploads by installing them (telling the installers to install the exact version we uploaded). Following the upload it may take a few minutes for the servers to update their index. This target will wait for each package to become available before it will attempt to install it.
 
     ```
     make test-install             # pip install fastai==1.0.6; pip uninstall fastai
                                   # conda install -y -c fastai fastai==1.0.6
     ```
 
-14. if some problems were detected during the release process, or something was committed by mistake into the release brach, and as a result changes were made to the release branch, merge those back into the master branch. Except for the version change in `fastaai/version.py`.
+8. if some problems were detected during the release process, or something was committed by mistake into the release branch, and as a result changes were made to the release branch, merge those back into the master branch. Except for the version change in `fastaai/version.py`.
 
     1. check whether anything needs to be backported
 
@@ -228,11 +242,14 @@ We are ready to make the new release branch:
     If the `make backport-check` target says you need to backport, proceed to the [backporting section](#backporting-release-branch-to-master). This stage can't be fully automated since it requires you to decide what to backport if anything.
 
 
-15. leave this branch to be indefinitely, and switch back to master, so that you won't be mistakenly committing to the release branch when you intended `master`:
+9. leave this branch to be indefinitely, and switch back to master, so that you won't be mistakenly committing to the release branch when you intended `master`:
 
     ```
     make master-branch-switch     # git checkout master
     ```
+
+10. announce the release and its changes in [Developer chat thread](https://forums.fast.ai/t/developer-chat/22363/289).
+
 
 
 ### Backporting release Branch To master
@@ -282,12 +299,12 @@ Find what needs to be backported, there are a few ways to approach it:
 * get list of commits between the branching point and the HEAD of the branch
 
     ```
-    git log  --oneline $(git merge-base --fork-point master origin/release-1.0.6)..origin/release-1.0.6
+    git log  --oneline $(git merge-base master origin/release-1.0.6)..origin/release-1.0.6
     ```
 
 * get the diff of commits between the branching point and the HEAD of the branch
     ```
-    git diff $(git merge-base --fork-point master origin/release-1.0.6)..origin/release-1.0.6
+    git diff $(git merge-base master origin/release-1.0.6)..origin/release-1.0.6
     ```
 
 * alternative GUI way: checking what needs to be backported on github
@@ -344,7 +361,6 @@ When done, complete the backporting
    git commit -m "backporting from release branch to master"
    git push
    ```
-
 
 
 
@@ -959,6 +975,12 @@ Here is how you can find out currently installed packages and conda dependencies
     conda list spacy
     ```
 
+    Same, but do not show pip-only installed packages.
+    ```
+    conda list --no-pip spacy
+    ```
+
+
 * To find out the dependencies of a package:
 
     ```
@@ -996,6 +1018,20 @@ Here is how you can find out currently installed packages and conda dependencies
     ```
 
     Add `-c fastai/label/test` to make it check our test package.
+
+
+Here is the full Conda packages version specification table:
+
+Constraint type         | Specification       | Result
+------------------------|---------------------|-----------------------------------
+Fuzzy                   |numpy=1.11           |1.11.0, 1.11.1, 1.11.2, 1.11.18 etc.
+Exact                   |numpy==1.11          |1.11.0
+Greater than or equal to|"numpy>=1.11"        |1.11.0 or higher
+OR                      |"numpy=1.11.1|1.11.3"|1.11.1, 1.11.3
+AND                     |"numpy>=1.8,<2"      |1.8, 1.9, not 2.0
+
+
+
 
 * Other `conda search` tricks:
 
@@ -1180,6 +1216,22 @@ Currently we don't have the following enforcement enabled ([PR won't be merge-ab
 ) if the PR's build status is failed.)
 
 
+#### Path Filters
+
+By default CI runs on any push made, regardless of whether it's a code or a document changed, which is a waste, so it helps to add Include/Exclude path filters.
+
+To do that choose a build setup, go to Edit => Triggers, "Continuous Integration", check the "Override" on the right, and enable "Path filters". Important rules - paths start with `/` and if you include an Exclude filter you must also include an Include filter!!! So for example to exclude anything under /docs from triggering a build, add 2 rules:
+
+Type    | Path specification
+--------|----------------
+Include | /
+Exclude | /docs
+
+Now repeat the same for "Pull request validation".
+
+Choose 'Save', under "Save & Queue".
+
+
 #### Manual Jobs
 
 To trigger a manual build of go to [Builds](https://dev.azure.com/fastdotai/fastai/_build), choose Queue, choose the branch (`master`) and in the Commit field either nothing or enter the desired commit hash. This is the way to get occasional CI builds against non-master branches, which is useful when testing a new pipeline.
@@ -1222,7 +1274,11 @@ And remember to sync the branch with the master changes so that you're testing t
 
 Currently [New] will not let you choose an alternative pipeline. So until this is fixed, let it use the default `azure-pipelines.yml`, Save and then go and Edit it and replace with a different file from the repository (and perhaps switching to a different branch if needed), using [...].
 
+#### Support
 
+- General Azure DevOps issues: https://developercommunity.visualstudio.com/spaces/21/index.html
+- Task-specific issues: https://github.com/Microsoft/azure-pipelines-tasks/issues/
+- Agent-specific issues: https://github.com/Microsoft/azure-pipelines-agent
 
 
 ## Package Download Statistics
