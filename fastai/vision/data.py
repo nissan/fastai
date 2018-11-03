@@ -68,8 +68,9 @@ class ImageClassificationBase(LabelDataset):
     def __init__(self, fns:FilePathList, classes:Optional[Collection[Any]]=None):
         super().__init__(classes=classes)
         self.x  = np.array(fns)
+        self.image_opener = open_image
 
-    def _get_x(self,i): return open_image(self.x[i])
+    def _get_x(self,i): return self.image_opener(self.x[i])
 
     def new(self, *args, classes:Optional[Collection[Any]]=None, **kwargs):
         if classes is None: classes = self.classes
@@ -146,13 +147,14 @@ class ImageMultiDataset(ImageClassificationBase):
 
 class SegmentationDataset(ImageClassificationBase):
     "A dataset for segmentation task."
-    def __init__(self, x:FilePathList, y:FilePathList, classes:Collection[Any], div=False, convert_mode='L'):
+    def __init__(self, x:FilePathList, y:FilePathList, classes:Collection[Any]):
         assert len(x)==len(y)
         super().__init__(x, classes)
-        self.y,self.div,self.convert_mode = np.array(y),div,convert_mode
+        self.y = np.array(y)
         self.loss_func = CrossEntropyFlat()
+        self.mask_opener = open_mask
 
-    def _get_y(self,i): return open_mask(self.y[i], self.div, self.convert_mode)
+    def _get_y(self,i): return self.mask_opener(self.y[i])
 
 class ObjectDetectDataset(ImageClassificationBase):
     "A dataset with annotated images."
@@ -194,11 +196,19 @@ def bb_pad_collate(samples:BatchSamples, pad_idx:int=0) -> Tuple[FloatTensor, Tu
         labels[i,-len(lbls):] = lbls
     return torch.cat(imgs,0), (bboxes,labels)
 
+def _prep_tfm_kwargs(tfms, kwargs):
+    default_rsz = ResizeMtd.SQUISH if ('size' in kwargs and is_listy(kwargs['size'])) else ResizeMtd.CROP
+    resize_mtd = getattr(kwargs, 'resize_mtd', default_rsz)
+    if resize_mtd <= 2: tfms = [crop_pad()] + tfms
+    kwargs['resize_mtd'] = resize_mtd
+    return tfms, kwargs
+
 class DatasetTfm(Dataset):
     "`Dataset` that applies a list of transforms to every item drawn."
     def __init__(self, ds:Dataset, tfms:TfmList=None, tfm_y:bool=False, **kwargs:Any):
         "this dataset will apply `tfms` to `ds`"
-        self.ds,self.tfms,self.kwargs,self.tfm_y = ds,tfms,kwargs,tfm_y
+        self.ds,self.tfm_y = ds,tfm_y
+        self.tfms,self.kwargs = _prep_tfm_kwargs(tfms,kwargs)
         self.y_kwargs = {**self.kwargs, 'do_resolve':False}
 
     def __len__(self)->int: return len(self.ds)
@@ -220,11 +230,12 @@ def _transform_dataset(self, tfms:TfmList=None, tfm_y:bool=False, **kwargs:Any)-
 DatasetBase.transform = _transform_dataset
 
 def transform_datasets(train_ds:Dataset, valid_ds:Dataset, test_ds:Optional[Dataset]=None,
-                       tfms:Optional[Tuple[TfmList,TfmList]]=None, **kwargs:Any):
+                       tfms:Optional[Tuple[TfmList,TfmList]]=None, resize_mtd:ResizeMtd=None, **kwargs:Any):
     "Create train, valid and maybe test DatasetTfm` using `tfms` = (train_tfms,valid_tfms)."
-    res = [DatasetTfm(train_ds, tfms[0],  **kwargs),
-           DatasetTfm(valid_ds, tfms[1],  **kwargs)]
-    if test_ds is not None: res.append(DatasetTfm(test_ds, tfms[1],  **kwargs))
+    tfms = ifnone(tfms, [[],[]])
+    res = [DatasetTfm(train_ds, tfms[0], resize_mtd=resize_mtd, **kwargs),
+           DatasetTfm(valid_ds, tfms[1], resize_mtd=resize_mtd, **kwargs)]
+    if test_ds is not None: res.append(DatasetTfm(test_ds, tfms[1], resize_mtd=resize_mtd, **kwargs))
     return res
 
 def normalize(x:TensorImage, mean:FloatTensor,std:FloatTensor)->TensorImage:
@@ -269,7 +280,7 @@ class ImageDataBunch(DataBunch):
         "Factory method. `bs` batch size, `ds_tfms` for `Dataset`, `tfms` for `DataLoader`."
         datasets = [train_ds,valid_ds]
         if test_ds is not None: datasets.append(test_ds)
-        if ds_tfms: datasets = transform_datasets(*datasets, tfms=ds_tfms, size=size, **kwargs)
+        if ds_tfms or size: datasets = transform_datasets(*datasets, tfms=ds_tfms, size=size, **kwargs)
         dls = [DataLoader(*o, num_workers=num_workers) for o in
                zip(datasets, (bs,bs*2,bs*2), (True,False,False))]
         return cls(*dls, path=path, device=device, tfms=tfms, collate_fn=collate_fn)
@@ -318,7 +329,7 @@ class ImageDataBunch(DataBunch):
                 fn_col=fn_col, label_col=label_col, suffix=suffix, header=header, **kwargs)
 
     @classmethod
-    def from_lists(cls, path:PathOrStr, fnames:FilePathList, labels:Collection[str], valid_pct:int=0.2, test:str=None, **kwargs):
+    def from_lists(cls, path:PathOrStr, fnames:FilePathList, labels:Collection[str], valid_pct:float=0.2, test:str=None, **kwargs):
         classes = uniqueify(labels)
         train,valid = random_split(valid_pct, fnames, labels)
         datasets = [ImageClassificationDataset(*train, classes),
@@ -327,12 +338,12 @@ class ImageDataBunch(DataBunch):
         return cls.create(*datasets, path=path, **kwargs)
 
     @classmethod
-    def from_name_func(cls, path:PathOrStr, fnames:FilePathList, label_func:Callable, valid_pct:int=0.2, test:str=None, **kwargs):
+    def from_name_func(cls, path:PathOrStr, fnames:FilePathList, label_func:Callable, valid_pct:float=0.2, test:str=None, **kwargs):
         labels = [label_func(o) for o in fnames]
         return cls.from_lists(path, fnames, labels, valid_pct=valid_pct, test=test, **kwargs)
 
     @classmethod
-    def from_name_re(cls, path:PathOrStr, fnames:FilePathList, pat:str, valid_pct:int=0.2, test:str=None, **kwargs):
+    def from_name_re(cls, path:PathOrStr, fnames:FilePathList, pat:str, valid_pct:float=0.2, test:str=None, **kwargs):
         pat = re.compile(pat)
         def _get_label(fn): return pat.search(str(fn)).group(1)
         return cls.from_name_func(path, fnames, _get_label, valid_pct=valid_pct, test=test, **kwargs)
@@ -435,4 +446,11 @@ class ImageFileList(InputList):
     def from_folder(cls, path:PathOrStr='.', extensions:Collection[str]=image_extensions, recurse=True)->'ImageFileList':
         "Get the list of files in `path` that have a suffix in `extensions`. `recurse` determines if we search subfolders."
         return cls(get_files(path, extensions=extensions, recurse=recurse), path)
+
+def split_data_add_test_folder(self, test_folder:str='test', label:Any=None):
+    "Add test set containing items from folder `test_folder` and an arbitrary label"
+    items = ImageFileList.from_folder(self.path/test_folder)
+    return self.add_test(items, label=label)
+
+SplitData.add_test_folder = split_data_add_test_folder
 
