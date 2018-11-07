@@ -10,19 +10,42 @@ Note that the top-most release is changes in the unreleased master branch on
 Github. Parentheses after an item show the name or github id of the contributor
 of that change.
 
-
-
-## 1.0.19.dev0 (Work In Progress)
+## 1.0.20.dev0 (Work In Progress)
 
 ### New:
 
-- add an argument `ResizeMtd` that tells `apply_tfms` how to resize the image to the desired size (crop, pad, squish or no).
+- `DataBunch.dl` replaces the various `holdout`, `is_test`, and `is_train` approaches with a single consistent enum.
+- `fastai.text` is fully compatible with the data block API.
+
+### Changed:
+
+- `TextDataset` has now two subclasses for the preprocessing steps and doesn't do that preprocesing automatically.
+- `TextDataBunch` doesn't save the result of preprocessing automatically, you have to use `TextDataBunch.save`.
+- `RNNLearner.classifier` is now `text_classifier_learner` and `RNN_Learner.language_model` is now `language_model_learner`.
+
+### Fixed:
+
+- Imports in the file picker widget (thanks to hiromis)
+- Batches of size 1 will be tossed aside during training because of the issue with BatchNorm
+- Confusion matrix show ints if `normalize=False` (default)
+- `RNNLearner.get_preds` return the preds in the right order (thanks to StatisticDean)
+- `num_features_model` now works with any model
+- `resize_method` wasn't properly set when passed to `ImageDataBunch`
+- `reset` the RNNs at the beginning of each epoch in `RNNTrainer`
+
+## 1.0.19 (2018-11-03)
+
+### New:
+
+- add an argument `resize_method` that tells `apply_tfms` how to resize the image to the desired size (crop, pad, squish or no).
 - all the image dataset have an `image_opener` attribute (default `open_image`) that can be changed. The `SegmentationDataset` has a `mask_opener` attribute.
 - `add_test` and `add_test_folder` in data block API.
 
 ### Changed:
 
-- `verify_images` can know resize images on top of checking they're not broken.
+- jupyter et al no longer forced dependencies
+- `verify_images` can now resize images on top of checking they're not broken.
+- LR finder plot now uses python scientific notation instead of math superset notation
 
 ### Fixed:
 

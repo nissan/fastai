@@ -31,7 +31,7 @@ def _df_to_fns_labels(df:pd.DataFrame, fn_col:int=0, label_col:int=1,
     labels = df.iloc[:,label_col]
     if label_delim: labels = np.array(list(csv.reader(labels, delimiter=label_delim)))
     else: labels = labels.values
-    fnames = df.iloc[:,fn_col].str.lstrip()
+    fnames = df.iloc[:,fn_col] if isinstance(df.iloc[0,fn_col], Path) else df.iloc[:,fn_col].str.lstrip()
     if suffix: fnames = fnames + suffix
     return fnames.values, labels
 
@@ -94,17 +94,21 @@ class LabelList(PathItemList):
     def files(self): return self.items[:,0]
 
     @classmethod
-    def from_df(cls, path:PathOrStr, df:DataFrame, input_col:int=0, label_cols:Collection[int]=None):
-        label_cols = ifnone(label_cols, [1])
-        inputs = df.iloc[:,input_col].values
-        labels = np.squeeze(df.iloc[:,label_cols].values).astype(np.float32 if len(label_cols) > 1 else np.int64)
+    def from_df(cls, path:PathOrStr, df:DataFrame, input_cols:IntsOrStrs=0, label_cols:IntsOrStrs=1):
+        inputs = np.squeeze(df.iloc[:,df_names_to_idx(input_cols, df)].values)
+        labels = np.squeeze(df.iloc[:,df_names_to_idx(label_cols, df)].values)
         return LabelList([(i,l) for (i,l) in zip(inputs, labels)], path)
 
     @classmethod
-    def from_csv(cls, path:PathOrStr, csv_fname:PathOrStr, input_col:int=0, label_cols:Collection[int]=None, header:str=None):
+    def from_csv(cls, path:PathOrStr, csv_fname:PathOrStr, input_cols:IntsOrStrs=0, label_cols:IntsOrStrs=1, header:str='infer'):
         df = pd.read_csv(path/csv_fname, header=header)
         return cls.from_df(path, df, input_col, label_cols)
-
+    
+    @classmethod
+    def from_csvs(cls, path:PathOrStr, csv_fnames:Collection[PathOrStr], input_cols:IntsOrStrs=0, label_cols:IntsOrStrs=1, 
+                  header:str='infer')->'LabelList':
+        return cls(np.concatenate([cls.from_csv(path, fname, input_cols, label_cols).items for fname in csv_fnames]))
+        
     def split_by_files(self, valid_names:InputList)->'SplitData':
         "Split the data by using the names in `valid_names` for validation."
         valid = [o for o in self.items if o[0] in valid_names]
@@ -134,13 +138,13 @@ class LabelList(PathItemList):
         valid = [o for o in self.items if o[0].parent.parts[n] == valid]
         train = [o for o in self.items if o[0].parent.parts[n] == train]
         return SplitData(self.path, LabelList(train), LabelList(valid))
-
+   
     def random_split_by_pct(self, valid_pct:float=0.2)->'SplitData':
         "Split the items randomly by putting `valid_pct` in the validation set."
         rand_idx = np.random.permutation(range(len(self.items)))
         cut = int(valid_pct * len(self.items))
         return self.split_by_idx(rand_idx[:cut])
-
+    
 @dataclass
 class SplitData():
     "A `LabelList` for each of `train` and `valid` (optional `test`), and method to get `datasets`"
@@ -151,6 +155,13 @@ class SplitData():
 
     def __post_init__(self): self.path = Path(self.path)
 
+    @classmethod
+    def from_csv(cls, path:PathOrStr, csv_fname:PathOrStr, input_cols:IntsOrStrs=0, label_cols:IntsOrStrs=1, 
+                 valid_col:int=2, header:str='infer')->'SplitData':
+        df = pd.read_csv(path/csv_fname, header=header)
+        val_idx = df.iloc[:,valid_col].nonzero()[0]
+        return LabelList.from_df(path, df, input_cols, label_cols).split_by_idx(val_idx)
+    
     @property
     def lists(self):
         res = [self.train,self.valid]

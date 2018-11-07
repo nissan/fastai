@@ -1,7 +1,8 @@
 "`fastai.data` loads and manages datasets with `DataBunch`"
 from .torch_core import *
 
-__all__ = ['SingleClassificationDataset', 'LabelXYDataset', 'DataBunch', 'DatasetBase', 'DeviceDataLoader', 'LabelDataset']
+DatasetType = Enum('DatasetType', 'Train Valid Test')
+__all__ = ['SingleClassificationDataset', 'LabelXYDataset', 'DataBunch', 'DatasetBase', 'DeviceDataLoader', 'LabelDataset', 'DatasetType']
 
 class DatasetBase(Dataset):
     "Base class for all fastai datasets."
@@ -51,6 +52,7 @@ class DeviceDataLoader():
     device: torch.device
     tfms: List[Callable]=None
     collate_fn: Callable=data_collate
+    skip_size1:bool=False
     def __post_init__(self):
         self.dl.collate_fn=self.collate_fn
         self.tfms = listify(self.tfms)
@@ -79,7 +81,10 @@ class DeviceDataLoader():
 
     def __iter__(self):
         "Process and returns items from `DataLoader`."
-        for b in self.dl: yield self.proc_batch(b)
+        for b in self.dl: 
+            y = b[1][0] if is_listy(b[1]) else b[1]
+            if not self.skip_size1 or y.size(0) != 1:
+                yield self.proc_batch(b)
 
     def one_batch(self)->Collection[Tensor]:
         "Get one batch from the data loader."
@@ -105,9 +110,9 @@ class DataBunch():
         self.tfms = listify(tfms)
         self.device = defaults.device if device is None else device
         assert not isinstance(train_dl,DeviceDataLoader)
-        self.train_dl = DeviceDataLoader(train_dl, self.device, self.tfms, collate_fn)
+        self.train_dl = DeviceDataLoader(train_dl, self.device, self.tfms, collate_fn, skip_size1=True)
         self.valid_dl = DeviceDataLoader(valid_dl, self.device, self.tfms, collate_fn)
-        self.test_dl  = DeviceDataLoader(test_dl,  self.device, self.tfms, collate_fn) if test_dl else None
+        self.test_dl  = DeviceDataLoader(test_dl, self.device, self.tfms, collate_fn) if test_dl is not None else None
         self.path = Path(path)
 
     @classmethod
@@ -122,9 +127,11 @@ class DataBunch():
         return cls(*dls, path=path, device=device, tfms=tfms, collate_fn=collate_fn)
 
     def __getattr__(self,k:int)->Any: return getattr(self.train_dl, k)
-    def holdout(self, is_test:bool=False)->DeviceDataLoader:
-        "Returns correct holdout `Dataset` for test vs validation (`is_test`)."
-        return self.test_dl if is_test else self.valid_dl
+    def dl(self, ds_type:DatasetType=DatasetType.Valid)->DeviceDataLoader:
+        "Returns appropriate `Dataset` for validation, training, or test (`ds_type`)."
+        return (self.train_dl if ds_type == DatasetType.Train else
+                self.test_dl if ds_type == DatasetType.Test else
+                self.valid_dl)
 
     def add_tfm(self,tfm:Callable)->None:
         self.train_dl.add_tfm(tfm)
