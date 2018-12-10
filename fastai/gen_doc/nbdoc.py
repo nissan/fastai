@@ -43,14 +43,20 @@ def code_esc(s): return f'`{s}`'
 
 def type_repr(t):
     if t in _typing_names: return link_type(t, _typing_names[t])
+    if isinstance(t, partial): return partial_repr(t)
     if hasattr(t, '__forward_arg__'): return link_type(t.__forward_arg__)
     elif getattr(t, '__args__', None):
         args = t.__args__
         if len(args)==2 and args[1] == type(None):
             return f'`Optional`\[{type_repr(args[0])}\]'
-        reprs = ', '.join([type_repr(o) for o in t.__args__])
+        reprs = ', '.join([type_repr(o) for o in args])
         return f'{link_type(t)}\[{reprs}\]'
     else: return link_type(t)
+
+def partial_repr(t):
+    args = (t.func,) + t.args + tuple([f'k={link_type(v)}' for k,v in t.keywords.items()])
+    reprs = ', '.join([link_type(o) for o in args])
+    return f'<code>partial(</code>{reprs}<code>)</code>'
 
 def anno_repr(a): return type_repr(a)
 
@@ -156,8 +162,17 @@ def link_docstring(modules, docstring:str, overwrite:bool=False)->str:
     for mod in mods: _modvars.update(mod.__dict__) # concat all module definitions
     return re.sub(BT_REGEX, replace_link, docstring)
 
+def find_mod(keyword):
+    mod = import_mod(keyword, ignore_errors=True)
+    if mod: return mod
+    if not keyword.startswith('fastai'):
+        return import_mod(f'fastai.{keyword}', ignore_errors=True)
+    return None
+
 def find_elt(modvars, keyword, match_last=False):
     "Attempt to resolve keywords such as Learner.lr_find. `match_last` starts matching from last component."
+    #mod = find_mod(keyword)
+    #if mod: return mod
     keyword = strip_fastai(keyword)
     if keyword in modvars: return modvars[keyword]
     comps = keyword.split('.')
