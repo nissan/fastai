@@ -3,84 +3,95 @@
 
 """The setup script."""
 
-import sys
-from pathlib import Path
+import re
 from setuptools import setup, find_packages
 
 # note: version is maintained inside fastai/version.py
 exec(open('fastai/version.py').read())
 
-with open('README.md') as readme_file:   readme = readme_file.read()
+with open('README.md') as readme_file: readme = readme_file.read()
 
-def to_list(buffer): return list(filter(None, map(str.strip, buffer.splitlines())))
+# helper functions to make it easier to list dependencies not as a python list, but vertically w/ optional built-in comments to why a certain version of the dependency is listed
+def cleanup(x):
+    x = x.strip()               # whitespace
+    x = re.sub(r' *#.*', '', x) # comments
+    return x
+def to_list(buffer): return list(filter(None, map(cleanup, buffer.splitlines())))
 
 ### normal dependencies ###
+#
+# IMPORTANT: when updating these, please make sure to sync conda/meta.yaml and docs/install.md (the "custom dependencies" section)
 #
 # these get resolved and installed via either of these two:
 #
 #   pip install fastai
 #   pip install -e .
 #
-# XXX: require torch>=1.0.0 once it's released, for now get the user to install it explicitly
-# XXX: using a workaround for torchvision, once torch-1.0.0 is out and a new torchvision depending on it is released switch to torchvision>=0.2.2
-# XXX: temporarily pinning spacy and its dependencies (regex, thinc, and cymem) to have a stable environment during the course duration.
+# dependencies to skip for now:
+# - cupy - is only required for QRNNs - sgugger thinks later he will get rid of this dep.
+#
+# XXX: when spacy==2.0.18 is on anaconda channel, put it in place (it's already on pypi) and remove its deps: cymem, regex, thinc (and update meta.yaml with the same)
 requirements = to_list("""
-    fastprogress>=0.1.15
+    bottleneck           # performance-improvement for numpy
+    cymem==2.0.2         # remove once spacy==2.0.18 is on anaconda channel
+    dataclasses ; python_version<'3.7'
+    fastprogress>=0.1.18
     matplotlib
+    numexpr              # performance-improvement for numpy
     numpy>=1.12
     pandas
     Pillow
+    pyyaml
+    regex==2018.01.10    # remove once spacy==2.0.18 is on anaconda channel
     requests
     scipy
     spacy==2.0.16
-    regex
-    thinc==6.12.0
-    cymem==2.0.2
-    torchvision-nightly
+    thinc==6.12.0        # remove once spacy==2.0.18 is on anaconda channel
+    torch
+    torchvision
     typing
-    pyyaml
 """)
-
-
-# dependencies to skip for now:
-#
-# cupy - is only required for QRNNs - sgguger thinks later he will get rid of this dep.
-
-if sys.version_info < (3,7): requirements.append('dataclasses')
 
 ### developer dependencies ###
 #
 # anything else that's not required by a user to run the library, but
-# either an enhancement or developer-build requirement goes here.
+# either is an enhancement or a developer-build requirement goes here.
 #
 # the [dev] feature is documented here:
 # https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras-optional-features-with-their-own-dependencies
 #
-# these get installed with:
+# these, including the normal dependencies, get installed with:
+#
+#   pip install fastai[dev]
+#
+# or via an editable install:
 #
 #   pip install -e .[dev]
 #
-# some of the listed modules appear in test_requirements as well, explained below.
+# some of the listed modules appear in test_requirements as well, as explained below.
 #
 dev_requirements = { 'dev' : to_list("""
     coverage
     distro
+    ipython
+    jupyter
     jupyter_contrib_nbextensions
+    nbconvert>=5.4
+    nbformat
+    notebook>=5.7.0
     pip>=9.0.1
     pipreqs>=0.4.9
     pytest
-    wheel>=0.30.0
-    ipython
-    jupyter
-    notebook>=5.7.0
-    nbconvert
-    nbformat
     traitlets
+    wheel>=0.30.0
 """) }
 
 ### setup dependencies ###
+# need at least setuptools>=36.2 to support syntax:
+#   dataclasses ; python_version<'3.7'
 setup_requirements = to_list("""
     pytest-runner
+    setuptools>=36.2
 """)
 
 # notes:
