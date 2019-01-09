@@ -25,7 +25,7 @@ If you are using `fastai` for any [course.fast.ai](http://course.fast.ai) course
 
 ## Installation
 
-**NB:** *fastai v1 currently supports Linux only, and requires **PyTorch v1** and **Python 3.6** or later. We are working to support Windows as soon as possible. Since Macs don't currently have good Nvidia GPU support, we do not currently prioritize Mac development.*
+**NB:** *fastai v1 currently supports Linux only, and requires **PyTorch v1** and **Python 3.6** or later. Windows support is at an experimental stage: it should work fine but we haven't thoroughly tested it. Since Macs don't currently have good Nvidia GPU support, we do not currently prioritize Mac development.*
 
 `fastai-1.x` can be installed with either `conda` or `pip` package managers and also from source. At the moment you can't just run *install*, since you first need to get the correct `pytorch` version installed - thus to get `fastai-1.x` installed choose one of the installation recipes below using your favourite python package manager. Note that **PyTorch v1** and **Python 3.6** are the minimal version requirements.
 
@@ -40,8 +40,7 @@ More advanced installation issues, such as installing only partial dependencies 
 ### Conda Install
 
 ```bash
-conda install -c pytorch pytorch torchvision
-conda install -c fastai fastai
+conda install -c pytorch -c fastai fastai
 ```
 
 Note that JPEG decoding can be a bottleneck, particularly if you have a fast GPU. You can optionally install an optimized JPEG decoder as follows (Linux):
@@ -49,20 +48,19 @@ Note that JPEG decoding can be a bottleneck, particularly if you have a fast GPU
 ```bash
 conda uninstall --force jpeg libtiff -y
 conda install -c conda-forge libjpeg-turbo
-CC="cc -mavx2" pip install --no-cache-dir -U --force-reinstall pillow-simd
+CC="cc -mavx2" pip install --no-cache-dir -U --force-reinstall --no-binary :all: --compile pillow-simd
 ```
+If you only care about faster JPEG decompression, it can be `pillow` or `pillow-simd` in the last command above, the latter speeds up other image processing operations. For the full story see [Pillow-SIMD](https://docs.fast.ai/performance.html#faster-image-processing).
 
 ### PyPI Install
 
 ```bash
-pip install torch torchvision
 pip install fastai
 ```
 
 ### Developer Install
 
-First, follow the instructions above for either `PyPi` or `Conda`. Then uninstall the `fastai` package using the **same package manager you used to install it**, i.e. `pip uninstall fastai` or `conda uninstall fastai`, and then, replace it with a [pip editable install](https://pip.pypa.io/en/stable/reference/pip_install/#editable-installs).
-
+The following instructions will result in a [pip editable install](https://pip.pypa.io/en/stable/reference/pip_install/#editable-installs), so that you can `git pull` at any time and your environment will automatically get the updates:
 
 ```bash
 git clone https://github.com/fastai/fastai
@@ -71,7 +69,9 @@ tools/run-after-git-clone
 pip install -e .[dev]
 ```
 
-You can test that the build works by starting the jupyter notebook:
+Note that this will install the `cuda9.0` `pytorch` build via default dependencies. If you need a higher or lower `cudaXX` build, following the instructions [here]( https://pytorch.org/get-started/locally/), to install the desired `pytorch` build.
+
+Next, you can test that the build works by starting the jupyter notebook:
 
 ```bash
 jupyter notebook
@@ -158,13 +158,22 @@ conda install conda
     | CUDA Toolkit | NVIDIA (Linux x86_64) |
     |--------------|-----------------------|
     | CUDA 10.0    | >= 410.00             |
-    | CUDA 9.2     | >= 396.26             |
     | CUDA 9.0     | >= 384.81             |
     | CUDA 8.0     | >= 367.48             |
 
    So if your NVIDIA driver is less than 384, then you can only use `cuda80`. Of course, you can upgrade your drivers to more recent ones if your card supports it.
+
    You can find a complete table with all variations [here](https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html).
 
+   If you use NVIDIA driver 410+, you most likely want to install the `cuda100` pytorch variant, via:
+   ```bash
+   conda install -c pytorch pytorch cuda100
+   ```
+   or if you need a lower version (`cuda90` is installed by default), use:
+   ```bash
+   conda install -c pytorch pytorch cuda80
+   ```
+   For other options refer to the complete list of [the available pytorch variants](https://pytorch.org/get-started/locally/).
 
 ## Updates
 

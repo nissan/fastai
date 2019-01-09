@@ -78,8 +78,9 @@ If you need to make a hotfix to an already released version, follow the [Hotfix 
 Here is the "I'm feeling lucky" version, do not attempt unless you understand the build process.
 
 ```
-make release
+make release 2>&1 | tee release-`date +"%Y-%m-%d-%H:%M:%S"`.log
 ```
+Ideally, don't remove the part that saves the full log - you might need it later.
 
 `make test`'s non-deterministic tests may decide to fail right during the release rites. It has now been moved to the head of the process, so if it fails not due to a bug but due to its unreliability, it won't affect the release process. Just rerun `make release` again.
 
@@ -87,7 +88,7 @@ Here is the quick version that includes all the steps w/o the explanations. If y
 
 ```
 make tools-update
-make master-branch-switch && make git-not-dirty
+make master-branch-switch && make sanity-check
 make test
 make bump && make changes-finalize
 make release-branch-create && make commit-version
@@ -134,10 +135,13 @@ The starting point of the workflow is a dev version of the master branch. For th
     make master-branch-switch    # git checkout master
     ```
 
-4. check-dirty - git cleanup/stash/commit so there is nothing in the way
+4. do sanity checks:
+
+    * check-dirty - git cleanup/stash/commit so there is nothing in the way
+    * version number is not messed up
 
     ```
-    make git-not-dirty || echo "Commit changes before proceeding"
+    make sanity-check
     ```
 
 5. pick a starting point
@@ -779,17 +783,17 @@ You can either edit `fastai/version.py` and change the version number by hand.
 
 Or run one of these `make` targets:
 
-Target            | Function
-------------------| --------------------------------------------
-bump-major        | bump major level; remove .devX if any
-bump-minor        | bump minor level; remove .devX if any
-bump-patch        | bump patch level unless has .devX, then don't bump, but remove .devX
-bump              | alias to bump-patch (as it's used often)
-bump-post-release | add .post1 or bump post-release level .post2, .post3, ...
-bump-major-dev    | bump major level and add .dev0
-bump-minor-dev    | bump minor level and add .dev0
-bump-patch-dev    | bump patch level and add .dev0
-bump-dev          | alias to bump-patch-dev (as it's used often)
+   Target            | Function
+   ------------------| --------------------------------------------
+   bump-major        | bump major level; remove .devX if any
+   bump-minor        | bump minor level; remove .devX if any
+   bump-patch        | bump patch level unless has .devX, then don't bump, but remove .devX
+   bump              | alias to bump-patch (as it's used often)
+   bump-post-release | add .post1 or bump post-release level .post2, .post3, ...
+   bump-major-dev    | bump major level and add .dev0
+   bump-minor-dev    | bump minor level and add .dev0
+   bump-patch-dev    | bump patch level and add .dev0
+   bump-dev          | alias to bump-patch-dev (as it's used often)
 
 e.g.:
 
@@ -963,7 +967,7 @@ If something found to be wrong in the last release, yet the HEAD is unstable to 
 5. Commit and push all the changes to the branch.
 
    ```
-   make commit-dev-cycle-push
+   make commit-hotfix-push
    ```
 
 6. Make a new tag with the new version.
