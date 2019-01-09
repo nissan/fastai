@@ -85,7 +85,7 @@ If you have `nvidia-smi` working and `pytorch` still can't recognize your NVIDIA
 Also note that `pytorch` will **silently fallback to CPU** if it reports `torch.cuda.is_available()` as `False`, so the only indicator of something being wrong will be that your notebooks will be running very slowly and you will hear your CPU revving up (if you are using a local system). Run:
 
 ```
-python -c 'import fastai; fastai.show_install(1)'
+python -c 'import fastai.utils.collect_env; fastai.utils.collect_env.show_install(1)'
 ```
 to detect such issues. If you have this problem it'll say that your torch cuda is not available.
 
@@ -306,7 +306,7 @@ It's possible that your system is misconfigured and while you think you're using
 You can check that by checking the output of `import torch; print(torch.cuda.is_available())` - it should return `True` if `pytorch` sees your GPU(s). You can also see the state of your setup with:
 
 ```
-python -c 'import fastai; fastai.show_install(1)'
+python -c 'import fastai.utils.collect_env; fastai.utils.collect_env.show_install(1)'
 ```
 which will include that check in its report.
 
@@ -330,7 +330,7 @@ If you use the [developer setup](https://github.com/fastai/fastai/blob/master/RE
 ```
 cd path/to/your/fastai/clone
 git pull
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
 Sometimes jupyter notebooks get messed up, and `git pull` might fail with an error like:
@@ -389,19 +389,47 @@ and it should just work. Now, go and sort out the rest of the installation, so t
 
 
 
+## ModuleNotFoundError: No module named ‘fastai.vision’
+
+If you have multiple environments, it's very possible that you installed `fastai` into one environment, but then are trying to use it from another, where it's not installed. Even more confusing, the situation where different environments have different versions of `fastai` installed, so its modules are found, but they don't work as you'd expect them to.
+
+If you use jupyter notebook, always make sure you activated the environment you installed `fastai` into before starting the `notebook`.
+
+There is an easy way to check whether you're in the right environment by either running from jupyter cell or in your code:
+
+```
+import sys
+print(sys.path)
+```
+and checking whether it shows the correct paths. That is compare these paths with the paths you installed `fastai` into.
+
+Alternatively, you can use the `fastai` helper that will show you that and other important details about your environment:
+
+```
+from fastai.utils.show_install import *
+show_install()
+```
+
+or the same from the command line:
+```
+python -m fastai.utils.show_install
+```
+Incidentally, we want you to include its output in any bug reports you may submit in the future.
+
+
+
 ## Conda environments not showing up in Jupyter Notebook
 
 While normally you shouldn't have this problem, and all the required things should get installed automatically, some users report that their jupyter notebook
-does not recognize newly created environments at times. They reported the following to work:
+does not recognize newly created environments at times. To fix that, perform:
 
 ```
-conda activate fastai-3.6
-conda install jupyter
-conda install nb_conda
-conda install nb_conda_kernels
-conda install ipykernel
-python -m ipykernel install --user --name fastai-3.6 --display-name "Python (fastai-3.6)"
+conda activate fastai
+conda install jupyter nb_conda nb_conda_kernels ipykernel
+python -m ipykernel install --user --name fastai --display-name "Python (fastai)"
 ```
+Replace `fastai` with the name of your conda environment if it's different.
+
 See also [Kernels for different environments](https://ipython.readthedocs.io/en/stable/install/kernel_install.html#kernels-for-different-environments).
 
 

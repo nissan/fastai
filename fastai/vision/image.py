@@ -5,7 +5,7 @@ from io import BytesIO
 import PIL
 
 __all__ = ['PIL', 'Image', 'ImageBBox', 'ImageSegment', 'ImagePoints', 'FlowField', 'RandTransform', 'TfmAffine', 'TfmCoord',
-           'TfmCrop', 'TfmLighting', 'TfmPixel', 'Transform', 'bb2hw', 'image2np', 'open_image', 'open_mask',
+           'TfmCrop', 'TfmLighting', 'TfmPixel', 'Transform', 'bb2hw', 'image2np', 'open_image', 'open_mask', 'tis2hw',
            'pil2tensor', 'scale_flow', 'show_image', 'CoordFunc', 'TfmList', 'open_mask_rle', 'rle_encode',
            'rle_decode', 'ResizeMethod', 'plot_flat', 'plot_multi', 'show_multi', 'show_all']
 
@@ -26,6 +26,11 @@ def image2np(image:Tensor)->np.ndarray:
 def bb2hw(a:Collection[int])->np.ndarray:
     "Convert bounding box points from (width,height,center) to (height,width,top,left)."
     return np.array([a[1],a[0],a[3]-a[1],a[2]-a[0]])
+
+def tis2hw(size:Union[int,TensorImageSize]) -> Tuple[int,int]:
+    "Convert `int` or `TensorImageSize` to (height,width) of an image."
+    if type(size) is str: raise RuntimeError("Expected size to be an int or a tuple, got a string.")
+    return listify(size, 2) if isinstance(size, int) else listify(size[-2:],2)
 
 def _draw_outline(o:Patch, lw:int):
     "Outline bounding box onto image `Patch`."
@@ -89,14 +94,14 @@ class Image(ItemBase):
 
     def apply_tfms(self, tfms:TfmList, do_resolve:bool=True, xtra:Optional[Dict[Callable,dict]]=None,
                    size:Optional[Union[int,TensorImageSize]]=None, resize_method:ResizeMethod=ResizeMethod.CROP,
-                   mult:int=32, padding_mode:str='reflection', mode:str='bilinear')->TensorImage:
+                   mult:int=32, padding_mode:str='reflection', mode:str='bilinear', remove_out:bool=True)->TensorImage:
         "Apply all `tfms` to the `Image`, if `do_resolve` picks value for random args."
         if not (tfms or xtra or size): return self
         xtra = ifnone(xtra, {})
         tfms = sorted(listify(tfms), key=lambda o: o.tfm.order)
         if do_resolve: _resolve_tfms(tfms)
         x = self.clone()
-        x.set_sample(padding_mode=padding_mode, mode=mode)
+        x.set_sample(padding_mode=padding_mode, mode=mode, remove_out=remove_out)
         if size is not None:
             crop_target = _get_crop_target(size, mult=mult)
             if resize_method in (ResizeMethod.CROP,ResizeMethod.PAD):
@@ -256,7 +261,7 @@ class ImagePoints(Image):
 
     def __repr__(self): return f'{self.__class__.__name__} {tuple(self.size)}'
     def _repr_image_format(self, format_str): return None
-
+    
     @property
     def flow(self)->FlowField:
         "Access the flow-field grid after applying queued affine and coord transforms."
@@ -334,6 +339,7 @@ class ImageBBox(ImagePoints):
     def create(cls, h:int, w:int, bboxes:Collection[Collection[int]], labels:Collection=None, classes:dict=None,
                pad_idx:int=0, scale:bool=True)->'ImageBBox':
         "Create an ImageBBox object from `bboxes`."
+        if isinstance(bboxes, np.ndarray) and bboxes.dtype == np.object: bboxes = np.array([bb for bb in bboxes])
         bboxes = tensor(bboxes).float()
         tr_corners = torch.cat([bboxes[:,0][:,None], bboxes[:,3][:,None]], 1)
         bl_corners = bboxes[:,1:3].flip(1)
@@ -567,9 +573,9 @@ def _round_multiple(x:int, mult:int)->int:
     "Calc `x` to nearest multiple of `mult`."
     return (int(x/mult+0.5)*mult)
 
-def _get_crop_target(target_px:Union[int,Tuple[int,int]], mult:int=32)->Tuple[int,int]:
+def _get_crop_target(target_px:Union[int,TensorImageSize], mult:int=32)->Tuple[int,int]:
     "Calc crop shape of `target_px` to nearest multiple of `mult`."
-    target_r,target_c = listify(target_px, 2)
+    target_r,target_c = tis2hw(target_px)
     return _round_multiple(target_r,mult),_round_multiple(target_c,mult)
 
 def _get_resize_target(img, crop_target, do_crop=False)->TensorImageSize:

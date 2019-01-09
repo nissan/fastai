@@ -12,15 +12,10 @@ exec(open('fastai/version.py').read())
 with open('README.md') as readme_file: readme = readme_file.read()
 
 # helper functions to make it easier to list dependencies not as a python list, but vertically w/ optional built-in comments to why a certain version of the dependency is listed
-def cleanup(x):
-    x = x.strip()               # whitespace
-    x = re.sub(r' *#.*', '', x) # comments
-    return x
+def cleanup(x): return re.sub(r' *#.*', '', x.strip()) # comments
 def to_list(buffer): return list(filter(None, map(cleanup, buffer.splitlines())))
 
 ### normal dependencies ###
-#
-# IMPORTANT: when updating these, please make sure to sync conda/meta.yaml and docs/install.md (the "custom dependencies" section)
 #
 # these get resolved and installed via either of these two:
 #
@@ -30,12 +25,12 @@ def to_list(buffer): return list(filter(None, map(cleanup, buffer.splitlines()))
 # dependencies to skip for now:
 # - cupy - is only required for QRNNs - sgugger thinks later he will get rid of this dep.
 #
-# XXX: when spacy==2.0.18 is on anaconda channel, put it in place (it's already on pypi) and remove its deps: cymem, regex, thinc (and update meta.yaml with the same)
+# IMPORTANT: when updating these, please make sure to sync conda/meta.yaml and docs/install.md (the "custom dependencies" section)
 requirements = to_list("""
     bottleneck           # performance-improvement for numpy
-    cymem==2.0.2         # remove once spacy==2.0.18 is on anaconda channel
     dataclasses ; python_version<'3.7'
     fastprogress>=0.1.18
+    bs4
     matplotlib
     numexpr              # performance-improvement for numpy
     numpy>=1.12
@@ -44,11 +39,9 @@ requirements = to_list("""
     packaging
     Pillow
     pyyaml
-    regex==2018.01.10    # remove once spacy==2.0.18 is on anaconda channel
     requests
     scipy
-    spacy==2.0.16
-    thinc==6.12.0        # remove once spacy==2.0.18 is on anaconda channel
+    spacy>=2.0.18
     torch
     torchvision
     typing
@@ -64,11 +57,11 @@ requirements = to_list("""
 #
 # these, including the normal dependencies, get installed with:
 #
-#   pip install fastai[dev]
+#   pip install "fastai[dev]"
 #
 # or via an editable install:
 #
-#   pip install -e .[dev]
+#   pip install -e ".[dev]"
 #
 # some of the listed modules appear in test_requirements as well, as explained below.
 #
@@ -79,6 +72,7 @@ dev_requirements = { 'dev' : to_list("""
     jupyter
     jupyter_contrib_nbextensions
     nbconvert>=5.4
+    nbdime                       # help with nb diff/merge
     nbformat
     notebook>=5.7.0
     pip>=9.0.1

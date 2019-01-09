@@ -51,11 +51,12 @@ def bb_pad_collate(samples:BatchSamples, pad_idx:int=0) -> Tuple[FloatTensor, Tu
     return torch.cat(imgs,0), (bboxes,labels)
 
 def _maybe_add_crop_pad(tfms):
-    tfm_names = [tfm.__name__ for tfm in tfms]
-    return [crop_pad()] + tfms if 'crop_pad' not in tfm_names else tfms
+    tfms = ifnone(tfms, [[],[]])
+    tfm_names = [[tfm.__name__ for tfm in o] for o in tfms]
+    return [([crop_pad()] + o if 'crop_pad' not in n else o) for o,n in zip(tfms, tfm_names)]
 
-def _prep_tfm_kwargs(tfms, kwargs):
-    default_rsz = ResizeMethod.SQUISH if ('size' in kwargs and is_listy(kwargs['size'])) else ResizeMethod.CROP
+def _prep_tfm_kwargs(tfms, size, kwargs):
+    default_rsz = ResizeMethod.SQUISH if (size is not None and is_listy(size)) else ResizeMethod.CROP
     resize_method = ifnone(kwargs.get('resize_method', default_rsz), default_rsz)
     if resize_method <= 2: tfms = _maybe_add_crop_pad(tfms)
     kwargs['resize_method'] = resize_method
@@ -98,11 +99,13 @@ class ImageDataBunch(DataBunch):
     @classmethod
     def create_from_ll(cls, lls:LabelLists, bs:int=64, ds_tfms:Optional[TfmList]=None,
                 num_workers:int=defaults.cpus, tfms:Optional[Collection[Callable]]=None, device:torch.device=None,
-                test:Optional[PathOrStr]=None, collate_fn:Callable=data_collate, size:int=None, **kwargs)->'ImageDataBunch':
+                test:Optional[PathOrStr]=None, collate_fn:Callable=data_collate, size:int=None, no_check:bool=False, 
+                **kwargs)->'ImageDataBunch':
         "Create an `ImageDataBunch` from `LabelLists` `lls` with potential `ds_tfms`."
+        ds_tfms, kwargs = _prep_tfm_kwargs(ds_tfms, size, kwargs)
         lls = lls.transform(tfms=ds_tfms, size=size, **kwargs)
         if test is not None: lls.add_test_folder(test)
-        return lls.databunch(bs=bs, tfms=tfms, num_workers=num_workers, collate_fn=collate_fn, device=device)
+        return lls.databunch(bs=bs, tfms=tfms, num_workers=num_workers, collate_fn=collate_fn, device=device, no_check=no_check)
 
     @classmethod
     def from_folder(cls, path:PathOrStr, train:PathOrStr='train', valid:PathOrStr='valid',
@@ -230,7 +233,7 @@ def verify_image(file:Path, idx:int, delete:bool, max_size:Union[int,Tuple[int,i
             img.save(dest_fname, img_format, **kwargs)
         img = np.array(img)
         img_channels = 1 if len(img.shape) == 2 else img.shape[2]
-        assert img_channels == n_channels, f"Image {file} has {img_channels} instead of {n_channels}"
+        assert img_channels == n_channels, f"Image {file} has {img_channels} instead of {n_channels} channels"
     except Exception as e:
         print(f'{e}')
         if delete: file.unlink()
@@ -277,9 +280,10 @@ class ImageItemList(ItemList):
     def from_df(cls, df:DataFrame, path:PathOrStr, cols:IntsOrStrs=0, folder:PathOrStr='.', suffix:str='', **kwargs)->'ItemList':
         "Get the filenames in `col` of `df` and will had `path/folder` in front of them, `suffix` at the end."
         suffix = suffix or ''
+        sep = os.path.sep
         res = super().from_df(df, path=path, cols=cols, **kwargs)
-        res.items = np.char.add(np.char.add(f'{folder}/', res.items.astype(str)), suffix)
-        res.items = np.char.add(f'{res.path}/', res.items)
+        res.items = np.char.add(np.char.add(f'{folder}{sep}', res.items.astype(str)), suffix)
+        res.items = np.char.add(f'{res.path}{sep}', res.items)
         return res
 
     @classmethod
@@ -346,9 +350,11 @@ class ObjectCategoryList(MultiCategoryList):
 
     def get(self, i):
         return ImageBBox.create(*_get_size(self.x,i), *self.items[i], classes=self.classes, pad_idx=self.pad_idx)
-
+    
+    def analyze_pred(self, pred): return pred
+    
     def reconstruct(self, t, x):
-        bboxes, labels = t
+        (bboxes, labels) = t
         if len((labels - self.pad_idx).nonzero()) == 0: return
         i = (labels - self.pad_idx).nonzero().min()
         bboxes,labels = bboxes[i:],labels[i:]
@@ -368,10 +374,8 @@ class SegmentationLabelList(ImageItemList):
     _processor=SegmentationProcessor
     def __init__(self, items:Iterator, classes:Collection=None, **kwargs):
         super().__init__(items, **kwargs)
+        self.copy_new.append('classes')
         self.classes,self.loss_func = classes,CrossEntropyFlat(axis=1)
-
-    def new(self, items, classes=None, **kwargs):
-        return self.new(items, ifnone(classes, self.classes), **kwargs)
 
     def open(self, fn): return open_mask(fn)
     def analyze_pred(self, pred, thresh:float=0.5): return pred.argmax(dim=0)[None]
@@ -402,7 +406,7 @@ class PointsLabelList(ItemList):
 class PointsItemList(ImageItemList):
     "`ItemList` for `Image` to `ImagePoints` tasks."
     _label_cls,_square_show_res = PointsLabelList,False
-    
+
 class ImageImageList(ImageItemList):
     "`ItemList` suitable for `Image` to `Image` tasks."
     _label_cls,_square_show,_square_show_res = ImageItemList,False,False
@@ -423,4 +427,3 @@ class ImageImageList(ImageItemList):
             x.show(ax=axs[i,0], **kwargs)
             y.show(ax=axs[i,2], **kwargs)
             z.show(ax=axs[i,1], **kwargs)
-
