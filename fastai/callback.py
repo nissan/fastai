@@ -9,6 +9,7 @@ __all__ = ['AverageMetric', 'Callback', 'CallbackHandler', 'OptimWrapper', 'Smoo
 class OptimWrapper():
     "Basic wrapper around `opt` to simplify hyper-parameters changes."
     def __init__(self, opt:optim.Optimizer, wd:Floats=0., true_wd:bool=False, bn_wd:bool=True):
+        assert not isinstance(opt, OptimWrapper)
         self.opt,self.true_wd,self.bn_wd = opt,true_wd,bn_wd
         self.opt_keys = list(self.opt.param_groups[0].keys())
         self.opt_keys.remove('params')
@@ -217,7 +218,7 @@ class SmoothenValue():
 
 CallbackList = Collection[Callback]
 
-def _get_init_state(): return {'epoch':0, 'iteration':0, 'num_batch':0}
+def _get_init_state(): return {'epoch':0, 'iteration':0, 'num_batch':0, 'skip_validate': False}
 
 @dataclass
 class CallbackHandler():
@@ -320,12 +321,15 @@ class CallbackHandler():
     def on_train_end(self, exception:Union[bool,Exception])->None:
         "Handle end of training, `exception` is an `Exception` or False if no exceptions during training."
         self('train_end', exception=exception)
+        
+    @property
+    def skip_validate(self): return self.state_dict['skip_validate']
 
 class AverageMetric(Callback):
     "Wrap a `func` in a callback for metrics computation."
     def __init__(self, func):
-        # If it's a partial, use func.func
-        name = getattr(func,'func', func).__name__
+        # If func has a __name__ use this one else it should be a partial
+        name = func.__name__ if hasattr(func, '__name__') else func.func.__name__
         self.func, self.name = func, name
         self.world = num_distrib()
 
@@ -336,13 +340,13 @@ class AverageMetric(Callback):
     def on_batch_end(self, last_output, last_target, **kwargs):
         "Update metric computation with `last_output` and `last_target`."
         if not is_listy(last_target): last_target=[last_target]
-        self.count += last_target[0].size(0)
+        self.count += first_el(last_target).size(0)
         val = self.func(last_output, *last_target)
         if self.world:
             val = val.clone()
             dist.all_reduce(val, op=dist.ReduceOp.SUM)
             val /= self.world
-        self.val += last_target[0].size(0) * val.detach().cpu()
+        self.val += first_el(last_target).size(0) * val.detach().cpu()
 
     def on_epoch_end(self, last_metrics, **kwargs):
         "Set the final result in `last_metrics`."

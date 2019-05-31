@@ -88,7 +88,10 @@ def test_purge():
     learn.model_dir = model_dir_orig
 
     # should fail to purge with a non-existent path
-    learn.model_dir = "lkjasdjssdlj"
+    learn.model_dir = "read_only"
+    os.makedirs(learn.path/"read_only")
+    os.chmod(learn.path/"read_only", mode=444)
+    
     try: learn.purge()
     except Exception as e:
         assert "Can't write to" in str(e) # should fail
@@ -96,6 +99,7 @@ def test_purge():
 
     finally: # restore the learner fixture
         learn.model_dir = model_dir_orig
+        shutil.rmtree(learn.path/"read_only")
 
 def test_save_load(learn):
     this_tests(learn.save, learn.load, learn.purge)
@@ -114,6 +118,14 @@ def test_save_load(learn):
     _ = learn.load(name)
     model_path = learn.save(name, return_path=True)
     _ = learn.load(name, purge=True)
+    check_learner(learn, model_summary_before, train_items_before)
+
+    # Test save/load using bytes streams
+    output_buffer = io.BytesIO()
+    learn.save(output_buffer)
+    learn.purge()
+    input_buffer = io.BytesIO(output_buffer.getvalue())
+    _ = learn.load(input_buffer)
     check_learner(learn, model_summary_before, train_items_before)
 
     # cleanup
@@ -226,15 +238,33 @@ def test_export_load_learner():
         print(f"\n*** Testing w/ learn.export(destroy={should_destroy})")
         with CaptureStdout() as cs: learn.export(destroy=should_destroy)
         learn = load_learner(path)
-        # export removes data, so train_items_before=0
-        # also testing learn.summary here on learn created from `load_learner`
-        check_learner(learn, model_summary_before=None, train_items_before=0)
-
-        try:    learn.summary()
-        except: assert "This is an empty `Learner`" in str(sys.exc_info()[1])
-        else:   assert False, "should have failed"
-
+        check_empty_learner(learn)
         if os.path.exists(export_file): os.remove(export_file)
+
+    print(f"\n*** Testing learn.export to buffer")
+    learn = fake_learner()
+    path = learn.path
+
+    output_buffer = io.BytesIO()
+    with CaptureStdout() as cs:
+        learn.export(output_buffer, destroy=should_destroy)
+    input_buffer = io.BytesIO(output_buffer.getvalue())
+    learn = load_learner(path, input_buffer)
+    check_empty_learner(learn)
+
+
+def check_empty_learner(learn):
+    # export removes data, so train_items_before=0
+    # also testing learn.summary here on learn created from `load_learner`
+    check_learner(learn, model_summary_before=None, train_items_before=0)
+
+    try:
+        learn.summary()
+    except:
+        assert "This is an empty `Learner`" in str(sys.exc_info()[1])
+    else:
+        assert False, "should have failed"
+
 
 # XXX: dupe with test_memory - integrate (moved from test_vision_train.py)
 def test_model_load_mem_leak():
@@ -249,7 +279,7 @@ def test_model_load_mem_leak():
     used_before = gpu_mem_get_used()
 
     name = 'mnist-tiny-test-load-mem-leak'
-    model_path = learn.save(name=name, return_path=True)
+    model_path = learn.save(name, return_path=True)
     _ = learn.load(name)
     if os.path.exists(model_path): os.remove(model_path)
     used_after = gpu_mem_get_used()

@@ -28,6 +28,7 @@ OptRange = Optional[Tuple[float,float]]
 OptStrTuple = Optional[Tuple[str,str]]
 OptStats = Optional[Tuple[np.ndarray, np.ndarray]]
 PathOrStr = Union[Path,str]
+PathLikeOrBinaryStream = Union[PathOrStr, BufferedWriter, BytesIO]
 PBar = Union[MasterBar, ProgressBar]
 Point=Tuple[float,float]
 Points=Collection[Point]
@@ -37,7 +38,6 @@ StartOptEnd=Union[float,Tuple[float,float]]
 StrList = Collection[str]
 Tokens = Collection[Collection[str]]
 OptStrList = Optional[StrList]
-
 np.set_printoptions(precision=6, threshold=50, edgeitems=4, linewidth=120)
 
 def num_cpus()->int:
@@ -46,21 +46,32 @@ def num_cpus()->int:
     except AttributeError: return os.cpu_count()
 
 _default_cpus = min(16, num_cpus())
-defaults = SimpleNamespace(cpus=_default_cpus, cmap='viridis', return_fig=False)
+defaults = SimpleNamespace(cpus=_default_cpus, cmap='viridis', return_fig=False, silent=False)
 
 def is_listy(x:Any)->bool: return isinstance(x, (tuple,list))
 def is_tuple(x:Any)->bool: return isinstance(x, tuple)
 def is_dict(x:Any)->bool: return isinstance(x, dict)
+def is_pathlike(x:Any)->bool: return isinstance(x, (str,Path))
 def noop(x): return x
 
 def chunks(l:Collection, n:int)->Iterable:
     "Yield successive `n`-sized chunks from `l`."
     for i in range(0, len(l), n): yield l[i:i+n]
 
+def recurse(func:Callable, x:Any, *args, **kwargs)->Any:
+    if is_listy(x): return [recurse(func, o, *args, **kwargs) for o in x]
+    if is_dict(x):  return {k: recurse(func, v, *args, **kwargs) for k,v in x.items()}
+    return func(x, *args, **kwargs)
+
+def first_el(x: Any)->Any:
+    "Recursively get the first element of `x`."
+    if is_listy(x): return first_el(x[0])
+    if is_dict(x):  return first_el(x[list(d.keys())[0]])
+    return x
+        
 def to_int(b:Any)->Union[int,List[int]]:
-    "Convert `b` to an int or list of ints (if `is_listy`); raises exception if not convertible"
-    if is_listy(b): return [to_int(x) for x in b]
-    else:          return int(b)
+    "Recursively convert `b` to an int or list/dict of ints; raises exception if not convertible."
+    return recurse(lambda x: int(x), b)
 
 def ifnone(a:Any,b:Any)->Any:
     "`a` if `a` is not None, otherwise `b`."
@@ -163,7 +174,7 @@ class ItemBase():
     def __eq__(self, other): return recurse_eq(self.data, other.data)
 
 def recurse_eq(arr1, arr2):
-    if is_listy(arr1): return np.all([recurse_eq(x,y) for x,y in zip(arr1,arr2)])
+    if is_listy(arr1): return is_listy(arr2) and len(arr1) == len(arr2) and np.all([recurse_eq(x,y) for x,y in zip(arr1,arr2)])
     else:              return np.all(np.atleast_1d(arr1 == arr2))
         
 def download_url(url:str, dest:str, overwrite:bool=False, pbar:ProgressBar=None,
@@ -319,11 +330,13 @@ def text2html_table(items:Collection[Collection[str]])->str:
 def parallel(func, arr:Collection, max_workers:int=None):
     "Call `func` on every element of `arr` in parallel using `max_workers`."
     max_workers = ifnone(max_workers, defaults.cpus)
-    if max_workers<2: _ = [func(o,i) for i,o in enumerate(arr)]
+    if max_workers<2: results = [func(o,i) for i,o in progress_bar(enumerate(arr), total=len(arr))]
     else:
         with ProcessPoolExecutor(max_workers=max_workers) as ex:
             futures = [ex.submit(func,o,i) for i,o in enumerate(arr)]
-            for f in progress_bar(concurrent.futures.as_completed(futures), total=len(arr)): pass
+            results = []
+            for f in progress_bar(concurrent.futures.as_completed(futures), total=len(arr)): results.append(f.result())
+    if any([o is not None for o in results]): return results
 
 def subplots(rows:int, cols:int, imgsize:int=4, figsize:Optional[Tuple[int,int]]=None, title=None, **kwargs):
     "Like `plt.subplots` but with consistent axs shape, `kwargs` passed to `fig.suptitle` with `title`"
@@ -355,3 +368,8 @@ def compose(funcs:List[Callable])->Callable:
 class PrettyString(str):
     "Little hack to get strings to show properly in Jupyter."
     def __repr__(self): return self
+    
+def float_or_x(x):
+    "Tries to convert to float, returns x if it can't"
+    try:   return float(x)
+    except:return x
